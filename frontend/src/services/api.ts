@@ -1,6 +1,9 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001/api';
+const isDev = import.meta.env.MODE === 'development';
+const API_URL = isDev 
+  ? 'http://localhost:5001/api' 
+  : (import.meta.env.VITE_API_URL || 'https://story-race-game.onrender.com/api');
 
 const api = axios.create({
   baseURL: API_URL,
