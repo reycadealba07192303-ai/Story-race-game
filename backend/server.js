@@ -46,6 +46,11 @@ app.get('/', (req, res) => {
     res.send('AI Gamified Campaign Builder API is running...');
 });
 
+// Health Check Endpoint for Uptime Robot
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'OK', message: 'Server is alive' });
+});
+
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

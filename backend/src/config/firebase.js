@@ -4,7 +4,23 @@ const { GoogleAuth } = require('google-auth-library');
 const path = require('path');
 
 const serviceAccountPath = path.join(__dirname, '../../config/firebase-service-account.json');
-const serviceAccount = require(serviceAccountPath);
+let serviceAccount;
+
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+  } catch (e) {
+    console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT environment variable:", e);
+    process.exit(1);
+  }
+} else {
+  try {
+    serviceAccount = require(serviceAccountPath);
+  } catch (e) {
+    console.error(`Failed to load service account from ${serviceAccountPath}. Ensure FIREBASE_SERVICE_ACCOUNT env var is set.`);
+    process.exit(1);
+  }
+}
 
 if (!getApps().length) {
   initializeApp({
@@ -15,7 +31,7 @@ if (!getApps().length) {
 const auth = getAuth();
 
 const googleAuth = new GoogleAuth({
-  keyFile: serviceAccountPath,
+  credentials: serviceAccount,
   scopes: [
     'https://www.googleapis.com/auth/identitytoolkit',
     'https://www.googleapis.com/auth/cloud-platform',
