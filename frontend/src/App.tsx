@@ -12,7 +12,7 @@ function App() {
 
   const MODAL_CONTENT: Record<string, { title: string; body: string }> = {
     'help-faq': { title: 'Help Center & FAQ', body: 'Welcome to our Help Center! Here you can find answers to common questions about using Story Race Game, from setting up your account to unlocking new chapters and navigating the storyboard.' },
-    'contact': { title: 'Contact Support', body: 'Need assistance? Reach out to our dedicated support team at support@storyracegame.edu. We typically respond within 24 hours to help with any technical or account-related issues.' },
+    'contact': { title: 'Contact Support', body: 'Need assistance? Reach out to our dedicated support team at reycadelacruzdealba@gmail.com. We typically respond within 24 hours to help with any technical or account-related issues.' },
     'reading-guides': { title: 'Reading Guides', body: 'Our Reading Guides provide structured pathways for educators and parents to maximize the learning potential of each interactive story. Discover lesson plans, discussion questions, and vocabulary lists.' },
     'system-status': { title: 'System Status', body: 'All systems are currently operational. We are running version 2.4.1. No scheduled maintenance in the next 7 days.' },
     'terms': { title: 'Terms of Service', body: 'By accessing Story Race Game, you agree to abide by our terms of use. The platform is designed for educational purposes, and we expect all users to maintain a respectful and safe environment.' },
@@ -66,8 +66,8 @@ function App() {
       {/* Hero Section */}
       <section className="hero">
         <div className="container">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '80px' }}>
-            <div className="hero-content" style={{ flex: '0 0 50%' }}>
+          <div className="hero-inner">
+            <div className="hero-content">
               <div className="badge">
                 <Sparkles size={16} style={{ marginRight: '8px' }} />
                 Gamified Reading for Grade 8

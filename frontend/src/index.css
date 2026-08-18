@@ -235,17 +235,22 @@ body.dark .btn-outline:hover {
 
 /* Hero Section */
 .hero {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   padding: 80px 0 120px;
   position: relative;
   background-image: radial-gradient(circle at 100% 50%, rgba(255,43,122,0.05) 0%, rgba(255,255,255,0) 50%),
                     radial-gradient(circle at 0% 100%, rgba(75,51,255,0.05) 0%, rgba(255,255,255,0) 50%);
+  overflow: hidden;
+}
+
+.hero-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 80px;
 }
 
 .hero-content {
-  flex: 1;
+  flex: 0 0 50%;
   max-width: 600px;
   z-index: 2;
 }
@@ -707,27 +712,30 @@ body.dark .footer-bottom {
 }
 
 @media (max-width: 1024px) {
-  .hero {
+  .hero-inner {
     flex-direction: column;
-    text-align: center;
     gap: 60px;
-    padding: 60px 0;
+    text-align: center;
   }
-  
+
   .hero-content {
-    align-items: center;
+    flex: unset;
     max-width: 100%;
   }
-  
-  .hero-buttons {
+
+  .hero-actions {
     justify-content: center;
   }
-  
-  .hero-image-wrapper {
+
+  .search-box {
+    max-width: 100%;
+  }
+
+  .hero-visuals {
     width: 100%;
     max-width: 500px;
   }
-  
+
   .hero-image {
     width: 100%;
     height: auto;
@@ -788,16 +796,40 @@ body.dark .footer-bottom {
     padding: 60px 0;
   }
 
+  .hero {
+    padding: 40px 0 80px;
+  }
+
+  .hero-inner {
+    flex-direction: column;
+    text-align: center;
+    gap: 40px;
+  }
+
+  .hero-content {
+    flex: unset;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .hero-actions {
+    justify-content: center;
+  }
+
   .hero-title {
     font-size: 36px;
-  }
-  
-  .hero-subtitle {
-    font-size: 16px;
+    letter-spacing: -1px;
   }
   
   .hero-desc {
     font-size: 16px;
+    max-width: 100%;
+  }
+
+  .hero-visuals {
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
   }
 
   .floating-card {
@@ -820,6 +852,12 @@ body.dark .footer-bottom {
 
   .about-content h3 {
     font-size: 28px;
+  }
+
+  .footer-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+    text-align: center;
   }
   
   .footer-content {
