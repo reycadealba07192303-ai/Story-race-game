@@ -37,6 +37,29 @@ function App() {
     }
   }, [isDarkMode]);
 
+  // Scale the landing page on mobile to show the full desktop layout
+  useEffect(() => {
+    const DESKTOP_WIDTH = 1300;
+
+    const applyMobileZoom = () => {
+      const app = document.querySelector<HTMLElement>('.app');
+      if (!app) return;
+
+      if (window.innerWidth < DESKTOP_WIDTH) {
+        const scale = window.innerWidth / DESKTOP_WIDTH;
+        app.style.width = `${DESKTOP_WIDTH}px`;
+        (app.style as CSSStyleDeclaration & { zoom: string }).zoom = String(scale);
+      } else {
+        app.style.width = '';
+        (app.style as CSSStyleDeclaration & { zoom: string }).zoom = '';
+      }
+    };
+
+    applyMobileZoom();
+    window.addEventListener('resize', applyMobileZoom);
+    return () => window.removeEventListener('resize', applyMobileZoom);
+  }, []);
+
   return (
     <div className="app">
       {/* Navigation */}
