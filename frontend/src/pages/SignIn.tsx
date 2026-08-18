@@ -53,28 +53,46 @@ export default function SignIn() {
     setInfo('');
     setNeedsVerify(false);
     setSubmitting(true);
-    try {
-      const data = await signinAPI({ email, password });
-      setSession(data.token, data.user);
-      const from = (location.state as { from?: string } | null)?.from;
-      const safeFrom =
-        from && typeof from === 'string' && from.startsWith('/') && !from.startsWith('//')
-          ? from
-          : null;
-      const roleHome = getRoleHomePath(data.user.role);
-      const dest =
-        safeFrom &&
-        (data.user.role === 'student' ? safeFrom.startsWith('/student') : safeFrom.startsWith(`/${data.user.role}`))
-          ? safeFrom
-          : roleHome;
-      navigate(dest, { replace: true });
-    } catch (err) {
-      const code = getAuthErrorCode(err);
-      setError(getAuthErrorMessage(err, 'Could not sign in.'));
-      if (code === 'EMAIL_NOT_VERIFIED') setNeedsVerify(true);
-    } finally {
-      setSubmitting(false);
-    }
+
+    const tryLogin = async (attempt: number): Promise<void> => {
+      try {
+        const data = await signinAPI({ email, password });
+        setSession(data.token, data.user);
+        const from = (location.state as { from?: string } | null)?.from;
+        const safeFrom =
+          from && typeof from === 'string' && from.startsWith('/') && !from.startsWith('//')
+            ? from
+            : null;
+        const roleHome = getRoleHomePath(data.user.role);
+        const dest =
+          safeFrom &&
+          (data.user.role === 'student' ? safeFrom.startsWith('/student') : safeFrom.startsWith(`/${data.user.role}`))
+            ? safeFrom
+            : roleHome;
+        navigate(dest, { replace: true });
+      } catch (err: any) {
+        const isNetworkError = !err?.response;
+        if (isNetworkError && attempt < 3) {
+          // Render backend is likely waking up — auto retry with countdown
+          for (let i = 10; i > 0; i--) {
+            setError(`🔄 Server is waking up... retrying in ${i}s (attempt ${attempt}/3)`);
+            await new Promise(r => setTimeout(r, 1000));
+          }
+          setError('');
+          return tryLogin(attempt + 1);
+        }
+        const code = getAuthErrorCode(err);
+        setError(
+          isNetworkError
+            ? '❌ Cannot reach the server. Please try again in a moment.'
+            : getAuthErrorMessage(err, 'Could not sign in.')
+        );
+        if (code === 'EMAIL_NOT_VERIFIED') setNeedsVerify(true);
+      }
+    };
+
+    await tryLogin(1);
+    setSubmitting(false);
   };
 
   const handleResend = async () => {
