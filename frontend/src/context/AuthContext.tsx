@@ -66,6 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       api.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
 
+      // If we already have a cached user, show the app immediately
+      // and refresh the token in the background (so Render waking up
+      // doesn't block the entire UI on mobile).
+      const cachedUser = readStoredUser();
+      if (cachedUser) {
+        if (!cancelled) setLoading(false);
+      }
+
       try {
         const data = await meAPI();
         if (!cancelled) {
@@ -73,7 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
         }
       } catch {
-        if (!cancelled) logout();
+        // Only log out if there was no cached user to fall back on
+        if (!cancelled && !cachedUser) logout();
       } finally {
         if (!cancelled) setLoading(false);
       }
