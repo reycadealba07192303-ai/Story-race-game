@@ -19,6 +19,7 @@ import {
   CheckCircle2, Clock, X, Zap, Target, Flame
 } from 'lucide-react';
 import JoinSectionPanel from '../../components/JoinSectionPanel';
+import { campaignMatchesSection } from '../../utils/sectionMatching';
 
 interface Campaign {
   _id: string;
@@ -80,9 +81,7 @@ export default function StudentSection() {
 
       const all: Campaign[] = campRes.campaigns ?? [];
       const sectionName = user?.section;
-      const filtered = sectionName && sectionName !== 'NA'
-        ? all.filter((c) => !c.targetSection || c.targetSection === 'All' || c.targetSection === sectionName || c.targetSection === 'NA')
-        : all;
+      const filtered = all.filter((c) => campaignMatchesSection(c.targetSection, sectionName));
       setCampaigns(filtered);
 
       const map: Record<string, { done: number; stars: number }> = {};

@@ -38,6 +38,20 @@ function roleColor(role) {
   return '#EC4899';
 }
 
+function campaignMatchesSection(campaign, sectionName) {
+  const targets = String(campaign.targetSection || '')
+    .split(',')
+    .map((part) => part.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (!targets.length || targets.includes('all') || targets.includes('na')) return true;
+
+  const section = String(sectionName || '').trim().toLowerCase();
+  if (!section || section === 'na') return false;
+
+  return targets.includes(section);
+}
+
 async function listUsers(req, res) {
   try {
     const { role, search } = req.query;
@@ -194,7 +208,10 @@ async function getStats(req, res) {
     }
 
     // student
-    const published = await Campaign.find({ published: true }).sort({ createdAt: -1 }).limit(5).lean();
+    const allPublished = await Campaign.find({ published: true }).sort({ createdAt: -1 }).lean();
+    const published = allPublished
+      .filter((campaign) => campaignMatchesSection(campaign, req.user.section))
+      .slice(0, 5);
     const leaderboardFilter = { role: 'student' };
     if (req.user.sectionId) leaderboardFilter.sectionId = req.user.sectionId;
     else if (req.user.section && req.user.section !== 'NA') leaderboardFilter.section = req.user.section;

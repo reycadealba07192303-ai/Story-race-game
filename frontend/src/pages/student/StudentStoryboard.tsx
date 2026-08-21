@@ -15,6 +15,7 @@ import StoryPageRenderer from '../../components/story/StoryPageRenderer';
 import { layoutFromStoryContent, normalizeStoryLayout, type StoryLayout } from '../../types/storyLayout';
 import { getMyProgressAPI, recordLevelProgressAPI, claimCampaignRewardAPI } from '../../services/usersApi';
 import { downloadAwardCertificate } from '../../utils/awardCertificate';
+import { campaignMatchesSection } from '../../utils/sectionMatching';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface CampaignLevel {
@@ -57,7 +58,9 @@ export default function StudentStoryboard() {
   useEffect(() => {
     Promise.all([getPublishedCampaignsAPI(), getMyProgressAPI().catch(() => ({ progress: [] }))])
       .then(([data, prog]) => {
-        const list: Campaign[] = data.campaigns ?? [];
+        const list: Campaign[] = (data.campaigns ?? []).filter((c: Campaign) =>
+          campaignMatchesSection(c.targetSection, user?.section)
+        );
 
         const mapped: Record<string, Record<number, LevelProgress>> = {};
         const meta: Record<string, CampaignRewardMeta> = {};
@@ -90,7 +93,7 @@ export default function StudentStoryboard() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [campaignParam]);
+  }, [campaignParam, user?.section]);
 
   // ── Timer ────────────────────────────────────────────────────────────────
   const stopTimer = useCallback(() => {
