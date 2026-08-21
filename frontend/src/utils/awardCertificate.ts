@@ -233,11 +233,7 @@ function drawUltraSeal(doc: jsPDF, cx: number, cy: number, scale: number = 1, im
   }
 
   if (imgData) {
-    // Draw an opaque white circle so the logo pops and isn't transparent over the navy background
-    doc.setFillColor(255, 255, 255);
-    doc.circle(cx, cy, 35.5 * scale, 'F');
-    // Draw the image
-    const imgSize = 70 * scale;
+    const imgSize = 68 * scale;
     doc.addImage(imgData, 'PNG', cx - imgSize / 2, cy - imgSize / 2, imgSize, imgSize);
   } else {
     // 5. Curved text inside seal
@@ -284,9 +280,17 @@ function drawUltraSeal(doc: jsPDF, cx: number, cy: number, scale: number = 1, im
 
 function drawRibbon(doc: jsPDF, cx: number, cy: number, text: string) {
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
-  const textW = doc.getTextWidth(text.toUpperCase());
-  const ribbonW = Math.max(textW + 80, 280);
+  const label = text.toUpperCase().replace(/\s+/g, ' ').trim();
+  let fontSize = 16;
+  doc.setFontSize(fontSize);
+  const maxRibbonW = 520;
+  const minRibbonW = 280;
+  while (fontSize > 11 && doc.getTextWidth(label) > maxRibbonW - 70) {
+    fontSize -= 0.5;
+    doc.setFontSize(fontSize);
+  }
+  const textW = doc.getTextWidth(label);
+  const ribbonW = Math.min(Math.max(textW + 80, minRibbonW), maxRibbonW);
   const ribbonH = 42;
   
   const tailDrop = 14;
@@ -343,11 +347,11 @@ function drawRibbon(doc: jsPDF, cx: number, cy: number, text: string) {
 
   // Text
   doc.setTextColor(255, 255, 255);
-  const spacedText = text.toUpperCase().split('').join('  ');
-  doc.text(spacedText, cx, cy + 6, { align: 'center' });
+  doc.setFontSize(fontSize);
+  doc.text(label, cx, cy + 6, { align: 'center' });
 }
 
-function loadImageAsBase64(url: string): Promise<string> {
+function loadImageAsBase64(url: string, removeWhiteBackground = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'Anonymous';
@@ -358,6 +362,21 @@ function loadImageAsBase64(url: string): Promise<string> {
       const ctx = canvas.getContext('2d');
       if (!ctx) return reject('No context');
       ctx.drawImage(img, 0, 0);
+
+      if (removeWhiteBackground) {
+        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = image.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (r > 238 && g > 238 && b > 238) {
+            data[i + 3] = 0;
+          }
+        }
+        ctx.putImageData(image, 0, 0);
+      }
+
       resolve(canvas.toDataURL('image/png'));
     };
     img.onerror = reject;
@@ -466,7 +485,7 @@ export async function downloadAwardCertificate(opts: {
   // Seal with Logo Embedded
   const cy = footerY - 10;
   try {
-    const imgData = await loadImageAsBase64('/774305900_27641489658835587_363435234290148032_n.jpg');
+    const imgData = await loadImageAsBase64('/774305900_27641489658835587_363435234290148032_n.jpg', true);
     drawUltraSeal(doc, cx, cy, 1.25, imgData);
   } catch (err) {
     console.error('Failed to load seal image, falling back to vector seal:', err);
