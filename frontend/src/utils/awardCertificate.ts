@@ -281,15 +281,17 @@ function drawUltraSeal(doc: jsPDF, cx: number, cy: number, scale: number = 1, im
 function drawRibbon(doc: jsPDF, cx: number, cy: number, text: string) {
   doc.setFont('helvetica', 'bold');
   const label = text.toUpperCase().replace(/\s+/g, ' ').trim();
+  const charSpace = -0.6; // tighten the default letterform gap so the title reads as one word, not spaced-out letters
   let fontSize = 16;
   doc.setFontSize(fontSize);
+  doc.setCharSpace(charSpace);
   const maxRibbonW = 520;
   const minRibbonW = 280;
-  while (fontSize > 11 && doc.getTextWidth(label) > maxRibbonW - 70) {
+  while (fontSize > 11 && doc.getTextWidth(label) + label.length * charSpace > maxRibbonW - 70) {
     fontSize -= 0.5;
     doc.setFontSize(fontSize);
   }
-  const textW = doc.getTextWidth(label);
+  const textW = doc.getTextWidth(label) + label.length * charSpace;
   const ribbonW = Math.min(Math.max(textW + 80, minRibbonW), maxRibbonW);
   const ribbonH = 42;
   
@@ -349,6 +351,60 @@ function drawRibbon(doc: jsPDF, cx: number, cy: number, text: string) {
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(fontSize);
   doc.text(label, cx, cy + 6, { align: 'center' });
+  doc.setCharSpace(0);
+}
+
+/**
+ * Removes the white/near-white background from a JPEG by flood-filling from
+ * the image edges. Unlike a flat pixel threshold, this only clears background
+ * pixels that are actually connected to the border, so it also eats the soft
+ * JPEG-compression halo around the artwork without touching interior white
+ * details (e.g. white lettering) that are enclosed by non-white outlines.
+ */
+function removeBackgroundFloodFill(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  const visited = new Uint8Array(width * height);
+
+  const isBackgroundish = (pixelIndex: number) => {
+    const i = pixelIndex * 4;
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    return r > 205 && g > 205 && b > 205 && Math.abs(r - g) < 20 && Math.abs(g - b) < 20;
+  };
+
+  const stack: number[] = [];
+  const pushIfBackground = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const p = y * width + x;
+    if (visited[p]) return;
+    if (!isBackgroundish(p)) return;
+    visited[p] = 1;
+    stack.push(p);
+  };
+
+  for (let x = 0; x < width; x++) {
+    pushIfBackground(x, 0);
+    pushIfBackground(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    pushIfBackground(0, y);
+    pushIfBackground(width - 1, y);
+  }
+
+  while (stack.length) {
+    const p = stack.pop()!;
+    const x = p % width;
+    const y = (p / width) | 0;
+    data[p * 4 + 3] = 0;
+    pushIfBackground(x + 1, y);
+    pushIfBackground(x - 1, y);
+    pushIfBackground(x, y + 1);
+    pushIfBackground(x, y - 1);
+  }
+
+  ctx.putImageData(imageData, 0, 0);
 }
 
 function loadImageAsBase64(url: string, removeWhiteBackground = false): Promise<string> {
@@ -364,17 +420,7 @@ function loadImageAsBase64(url: string, removeWhiteBackground = false): Promise<
       ctx.drawImage(img, 0, 0);
 
       if (removeWhiteBackground) {
-        const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const data = image.data;
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          if (r > 238 && g > 238 && b > 238) {
-            data[i + 3] = 0;
-          }
-        }
-        ctx.putImageData(image, 0, 0);
+        removeBackgroundFloodFill(ctx, canvas.width, canvas.height);
       }
 
       resolve(canvas.toDataURL('image/png'));
