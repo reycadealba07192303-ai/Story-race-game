@@ -135,7 +135,7 @@ export default function DashboardLayout({
 
       <aside className={`db-sidebar ${mobileNavOpen ? 'open' : ''}`}>
         <Link to="/" className="db-sidebar-logo">
-          <img src="/774305900_27641489658835587_363435234290148032_n.jpg" alt="Logo" />
+          <img src="/story-race-logo.png" alt="Logo" />
           <span>STORY RACEGAME</span>
         </Link>
 

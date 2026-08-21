@@ -717,21 +717,8 @@ body {
 }
 
 /* ==========================================================================
-   Logo Background Removal (Global)
+   Logo (story-race-logo.png already has a transparent background)
    ========================================================================== */
-img[src*="774305900_"] {
-  mix-blend-mode: multiply;
+img[src*="story-race-logo"] {
   object-fit: contain;
-}
-
-body.dark img[src*="774305900_"],
-.auth-left img[src*="774305900_"],
-.footer img[src*="774305900_"] {
-  filter: invert(1);
-  mix-blend-mode: screen;
-}
-
-body.dark .footer img[src*="774305900_"] {
-  filter: none;
-  mix-blend-mode: multiply;
 }

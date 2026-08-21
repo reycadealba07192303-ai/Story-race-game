@@ -30,7 +30,7 @@ export default function ForgotPassword() {
         <div className="auth-left-overlay" />
         <div className="auth-left-card">
           <Link to="/" className="auth-logo">
-            <img src="/774305900_27641489658835587_363435234290148032_n.jpg" alt="Story Race Game" className="auth-logo-img" />
+            <img src="/story-race-logo.png" alt="Story Race Game" className="auth-logo-img" />
             <span>STORY RACEGAME</span>
           </Link>
 

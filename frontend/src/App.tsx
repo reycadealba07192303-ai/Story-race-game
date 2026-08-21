@@ -67,7 +67,7 @@ function App() {
         <div className="navbar-bg"></div>
         <div className="container nav-container">
           <div className="nav-brand">
-            <img src="/774305900_27641489658835587_363435234290148032_n.jpg" alt="Story Race Game Logo" className="nav-brand-logo" />
+            <img src="/story-race-logo.png" alt="Story Race Game Logo" className="nav-brand-logo" />
             <span style={{ letterSpacing: '-1.5px', textTransform: 'uppercase', fontWeight: 900 }}>STORY RACEGAME</span>
           </div>
           
@@ -255,7 +255,7 @@ function App() {
           <div className="footer-grid">
             <div>
               <div className="footer-brand">
-                <img src="/774305900_27641489658835587_363435234290148032_n.jpg" alt="Logo" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'contain' }} />
+                <img src="/story-race-logo.png" alt="Logo" style={{ width: 32, height: 32, borderRadius: 8, objectFit: 'contain' }} />
                 <span style={{ letterSpacing: '-1.5px', textTransform: 'uppercase', fontWeight: 900 }}>STORY RACEGAME</span>
               </div>
               <p className="footer-desc">

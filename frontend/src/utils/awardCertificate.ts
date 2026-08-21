@@ -354,60 +354,7 @@ function drawRibbon(doc: jsPDF, cx: number, cy: number, text: string) {
   doc.setCharSpace(0);
 }
 
-/**
- * Removes the white/near-white background from a JPEG by flood-filling from
- * the image edges. Unlike a flat pixel threshold, this only clears background
- * pixels that are actually connected to the border, so it also eats the soft
- * JPEG-compression halo around the artwork without touching interior white
- * details (e.g. white lettering) that are enclosed by non-white outlines.
- */
-function removeBackgroundFloodFill(ctx: CanvasRenderingContext2D, width: number, height: number) {
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
-  const visited = new Uint8Array(width * height);
-
-  const isBackgroundish = (pixelIndex: number) => {
-    const i = pixelIndex * 4;
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    return r > 205 && g > 205 && b > 205 && Math.abs(r - g) < 20 && Math.abs(g - b) < 20;
-  };
-
-  const stack: number[] = [];
-  const pushIfBackground = (x: number, y: number) => {
-    if (x < 0 || y < 0 || x >= width || y >= height) return;
-    const p = y * width + x;
-    if (visited[p]) return;
-    if (!isBackgroundish(p)) return;
-    visited[p] = 1;
-    stack.push(p);
-  };
-
-  for (let x = 0; x < width; x++) {
-    pushIfBackground(x, 0);
-    pushIfBackground(x, height - 1);
-  }
-  for (let y = 0; y < height; y++) {
-    pushIfBackground(0, y);
-    pushIfBackground(width - 1, y);
-  }
-
-  while (stack.length) {
-    const p = stack.pop()!;
-    const x = p % width;
-    const y = (p / width) | 0;
-    data[p * 4 + 3] = 0;
-    pushIfBackground(x + 1, y);
-    pushIfBackground(x - 1, y);
-    pushIfBackground(x, y + 1);
-    pushIfBackground(x, y - 1);
-  }
-
-  ctx.putImageData(imageData, 0, 0);
-}
-
-function loadImageAsBase64(url: string, removeWhiteBackground = false): Promise<string> {
+function loadImageAsBase64(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'Anonymous';
@@ -418,11 +365,6 @@ function loadImageAsBase64(url: string, removeWhiteBackground = false): Promise<
       const ctx = canvas.getContext('2d');
       if (!ctx) return reject('No context');
       ctx.drawImage(img, 0, 0);
-
-      if (removeWhiteBackground) {
-        removeBackgroundFloodFill(ctx, canvas.width, canvas.height);
-      }
-
       resolve(canvas.toDataURL('image/png'));
     };
     img.onerror = reject;
@@ -531,7 +473,7 @@ export async function downloadAwardCertificate(opts: {
   // Seal with Logo Embedded
   const cy = footerY - 10;
   try {
-    const imgData = await loadImageAsBase64('/774305900_27641489658835587_363435234290148032_n.jpg', true);
+    const imgData = await loadImageAsBase64('/story-race-logo.png');
     drawUltraSeal(doc, cx, cy, 1.25, imgData);
   } catch (err) {
     console.error('Failed to load seal image, falling back to vector seal:', err);
