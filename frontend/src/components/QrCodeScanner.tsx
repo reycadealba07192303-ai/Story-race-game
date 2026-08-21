@@ -41,6 +41,8 @@ export default function QrCodeScanner({ active, onScan }: QrCodeScannerProps) {
           (decoded) => {
             if (handledRef.current) return;
             handledRef.current = true;
+            void stopScanner();
+            setStatus('idle');
             onScanRef.current(decoded);
           },
           () => {},

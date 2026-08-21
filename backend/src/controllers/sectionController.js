@@ -22,6 +22,34 @@ function publicSection(section, extras = {}) {
   };
 }
 
+function normalizeJoinCode(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return '';
+
+  try {
+    const parsed = new URL(raw);
+    const fromQuery =
+      parsed.searchParams.get('code') ||
+      parsed.searchParams.get('joinCode') ||
+      parsed.searchParams.get('join_code');
+    if (fromQuery) return fromQuery.trim().toUpperCase();
+
+    const pathMatch = parsed.pathname.match(/\/join\/([A-Za-z0-9-]+)/i);
+    if (pathMatch?.[1]) return pathMatch[1].trim().toUpperCase();
+  } catch {
+    const queryMatch = raw.match(/[?&](?:code|joinCode|join_code)=([^&#]+)/i);
+    if (queryMatch?.[1]) return decodeURIComponent(queryMatch[1]).trim().toUpperCase();
+  }
+
+  return raw.replace(/\s/g, '').toUpperCase();
+}
+
+function joinCodeExpiryFromNow() {
+  const expires = new Date();
+  expires.setDate(expires.getDate() + 7);
+  return expires;
+}
+
 async function listSections(req, res) {
   try {
     const { academicYear, academicYearId } = req.query;
@@ -135,8 +163,7 @@ async function createSection(req, res) {
     }
 
     const codeCreatedAt = new Date();
-    const codeExpiresAt = new Date();
-    codeExpiresAt.setDate(codeExpiresAt.getDate() + 7);
+    const codeExpiresAt = joinCodeExpiryFromNow();
 
     const section = await Section.create({
       name: name.trim(),
@@ -240,11 +267,7 @@ async function updateSection(req, res) {
       }
       section.code = code;
       section.codeCreatedAt = new Date();
-      if (!section.codeExpiresAt) {
-        const expires = new Date();
-        expires.setDate(expires.getDate() + 7);
-        section.codeExpiresAt = expires;
-      }
+      section.codeExpiresAt = joinCodeExpiryFromNow();
     }
 
     await section.save();
@@ -309,10 +332,10 @@ async function joinSection(req, res) {
       return res.status(403).json({ message: 'Only students can join a section with a code.' });
     }
 
-    const { code } = req.body;
-    if (!code?.trim()) return res.status(400).json({ message: 'Join code is required.' });
+    const code = normalizeJoinCode(req.body.code || req.body.joinCode || req.body.link);
+    if (!code) return res.status(400).json({ message: 'Join code is required.' });
 
-    const section = await Section.findOne({ code: code.trim().toUpperCase() });
+    const section = await Section.findOne({ code });
     if (!section) return res.status(404).json({ message: 'Invalid join code.' });
 
     if (section.codeExpiresAt && new Date() > new Date(section.codeExpiresAt)) {
