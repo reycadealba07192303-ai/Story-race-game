@@ -8,6 +8,15 @@ const { logAudit } = require('../utils/audit');
 // Initialize Groq — uses GROQ_API_KEY from .env
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
+function canAccessCampaign(campaign, user) {
+  if (!campaign || !user) return false;
+  if (user.role === 'admin') return true;
+  if (user.role === 'teacher') {
+    return campaign.createdBy && String(campaign.createdBy) === String(user._id);
+  }
+  return false;
+}
+
 // ── Helper: generate illustration via Pollinations.ai (free, no API key) ──
 async function generateIllustration(prompt, levelNumber) {
   const safePrompt = encodeURIComponent(
@@ -66,7 +75,11 @@ Ensure there are exactly ${numLevels} levels. Generate 3 quiz questions per leve
 // ── Generate campaign ─────────────────────────────────────────────────────
 exports.getCampaigns = async (req, res) => {
   try {
-    const campaigns = await Campaign.find().sort({ createdAt: -1 });
+    const filter = {};
+    if (req.user?.role === 'teacher') {
+      filter.createdBy = req.user._id;
+    }
+    const campaigns = await Campaign.find(filter).sort({ createdAt: -1 });
     res.status(200).json({ campaigns });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch campaigns', details: error.message });
@@ -86,6 +99,9 @@ exports.getCampaignById = async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!canAccessCampaign(campaign, req.user)) {
+      return res.status(403).json({ error: 'You do not have access to this campaign' });
+    }
     res.status(200).json({ campaign });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch campaign', details: error.message });
@@ -96,6 +112,9 @@ exports.deleteCampaign = async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!canAccessCampaign(campaign, req.user)) {
+      return res.status(403).json({ error: 'You do not have access to this campaign' });
+    }
 
     const title = campaign.title;
     const id = campaign._id;
@@ -138,7 +157,7 @@ exports.generateCampaign = async (req, res) => {
         },
       ],
       temperature: 0.7,
-      max_tokens: 8192,
+      max_tokens: 6000,
     });
 
     let responseText = completion.choices[0]?.message?.content ?? '';
@@ -172,6 +191,7 @@ exports.generateCampaign = async (req, res) => {
       templateId: templateId || 'space',
       customTheme: customTheme || null,
       storySource: 'ai',
+      createdBy: req.user?._id || null,
     });
 
     await newCampaign.save();
@@ -212,6 +232,7 @@ exports.saveCampaign = async (req, res) => {
       templateId: templateId || 'space',
       customTheme: customTheme || null,
       storySource: storySource || 'manual',
+      createdBy: req.user?._id || null,
     });
     await newCampaign.save();
 
@@ -257,6 +278,7 @@ exports.createManualCampaign = async (req, res) => {
       templateId: templateId || 'space',
       customTheme: customTheme || null,
       storySource: 'manual',
+      createdBy: req.user?._id || null,
     });
 
     await newCampaign.save();
@@ -299,6 +321,9 @@ exports.updateCampaign = async (req, res) => {
 
     const before = await Campaign.findById(id);
     if (!before) return res.status(404).json({ error: 'Campaign not found' });
+    if (!canAccessCampaign(before, req.user)) {
+      return res.status(403).json({ error: 'You do not have access to this campaign' });
+    }
 
     const wasPublished = Boolean(before.published);
     const updated = await Campaign.findByIdAndUpdate(
@@ -371,6 +396,9 @@ exports.getCampaignProgress = async (req, res) => {
     const { id } = req.params;
     const campaign = await Campaign.findById(id);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
+    if (!canAccessCampaign(campaign, req.user)) {
+      return res.status(403).json({ error: 'You do not have access to this campaign' });
+    }
 
     // 1. Students who have already started this campaign
     const usersWithProgress = await User.find({

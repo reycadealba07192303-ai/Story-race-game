@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import axios from 'axios';
 import {
   createManualCampaignAPI,
   generateCampaignAPI,
@@ -310,12 +311,16 @@ export default function TeacherStoryBuilder() {
       setStep('editor');
     } catch (err: unknown) {
       console.error(err);
-      const msg = err instanceof Error ? err.message : String(err);
+      let msg = err instanceof Error ? err.message : String(err);
+      if (axios.isAxiosError(err) && err.response?.data) {
+        const data = err.response.data as { error?: string; details?: string };
+        msg = [data.error, data.details].filter(Boolean).join('\n\n') || msg;
+      }
       await alert({
         title: 'Campaign failed',
         message: storySource === 'manual'
           ? 'Failed to create campaign. Make sure the backend is running.\n\n' + msg
-          : 'Failed to generate campaign. Make sure the backend is running and GROQ_API_KEY is set in .env.\n\n' + msg,
+          : 'Failed to generate campaign.\n\n' + msg,
         variant: 'danger',
       });
     } finally {

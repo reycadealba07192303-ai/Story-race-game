@@ -58,6 +58,7 @@ const CampaignSchema = new mongoose.Schema({
   customTheme: { type: String, default: null },
   storySource: { type: String, enum: ['ai', 'manual'], default: 'ai' },
   coverImage: { type: String, default: null },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   createdAt: { type: Date, default: Date.now },
 });
 
