@@ -1,13 +1,13 @@
 import axios from 'axios';
 
 const isDev = import.meta.env.MODE === 'development';
-const API_URL = isDev 
-  ? 'http://localhost:5001/api' 
-  : (import.meta.env.VITE_API_URL || 'https://story-race-game.onrender.com/api');
+const API_URL = isDev
+  ? 'http://localhost:5001/api'
+  : (import.meta.env.VITE_API_URL || 'https://story-race-game-w362.onrender.com/api');
 
 const api = axios.create({
   baseURL: API_URL,
-  headers: { 
+  headers: {
     'Content-Type': 'application/json',
     'Bypass-Tunnel-Reminder': 'true' // Bypass Localtunnel warning page for API calls
   },

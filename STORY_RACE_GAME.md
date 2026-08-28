@@ -17,6 +17,7 @@
 | Icons | **Lucide React** |
 | PDF/Certificate | **html2canvas + jsPDF** |
 | QR Scanning | **@zxing/library** |
+| Deployment | **Vercel** |
 
 ### Backend
 | Layer | Technology |
@@ -27,6 +28,7 @@
 | Auth | **Firebase Auth** (UID linking) + **JWT** |
 | AI | **Google Gemini AI API** |
 | Middleware | Custom Auth Guard, Role Guard, Audit Logger |
+| Deployment | **Render** |
 
 ---
 
