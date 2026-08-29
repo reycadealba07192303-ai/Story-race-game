@@ -111,6 +111,9 @@ interface CampaignData {
 
 type EditorTab = 'story' | 'vocabulary' | 'quiz' | 'preview';
 
+const MIN_LEVELS = 1;
+const MAX_LEVELS = 10;
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 const inputStyle: React.CSSProperties = {
   width: '100%', background: 'var(--db-input)', border: '1px solid var(--db-border)',
@@ -172,6 +175,7 @@ export default function TeacherStoryBuilder() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const storyFileRef = useRef<HTMLInputElement>(null);
   const levelsRef = useRef<LevelData[]>([]);
+  const skipAutoSaveRef = useRef(false);
 
   const [availableSections, setAvailableSections] = useState<Section[]>([]);
 
@@ -274,14 +278,23 @@ export default function TeacherStoryBuilder() {
       const copy = [...prev];
       const [moved] = copy.splice(fromIndex, 1);
       copy.splice(toIndex, 0, moved);
-      // Renumber after reorder so UI + backend stays consistent
-      return copy.map((lvl, idx) => ({ ...lvl, levelNumber: idx + 1 }));
+      const renumbered = copy.map((lvl, idx) => ({ ...lvl, levelNumber: idx + 1 }));
+      levelsRef.current = renumbered;
+      return renumbered;
     });
     setCurrentLevel(toIndex + 1);
     setActiveTab('story');
   };
 
-  const addStoryPage = () => {
+  const addLevel = () => {
+    if (levels.length >= MAX_LEVELS) {
+      void alert({
+        title: 'Level limit reached',
+        message: `A campaign can have at most ${MAX_LEVELS} levels.`,
+        variant: 'warning',
+      });
+      return;
+    }
     const newLevelNumber = levels.length + 1;
     const newLevel: LevelData = {
       levelNumber: newLevelNumber,
@@ -290,8 +303,45 @@ export default function TeacherStoryBuilder() {
       quiz: [],
       customImage: null,
     };
-    setLevels(prev => [...prev, newLevel]);
+    setLevels(prev => {
+      const next = [...prev, newLevel];
+      levelsRef.current = next;
+      return next;
+    });
     setCurrentLevel(newLevelNumber);
+    setActiveTab('story');
+  };
+
+  const deleteLevel = async (levelNumber: number) => {
+    if (levels.length <= MIN_LEVELS) {
+      await alert({
+        title: 'Keep one level',
+        message: 'A campaign needs at least one level.',
+        variant: 'warning',
+      });
+      return;
+    }
+    const lvl = levels.find((l) => l.levelNumber === levelNumber);
+    const ok = await confirm({
+      title: 'Delete level?',
+      message: `Remove Level ${levelNumber}${lvl?.storyNode.title ? ` ("${lvl.storyNode.title}")` : ''}? Click Save / Update to keep this change.`,
+      variant: 'danger',
+      confirmLabel: 'Delete level',
+    });
+    if (!ok) return;
+
+    setLevels((prev) => {
+      const renumbered = prev
+        .filter((l) => l.levelNumber !== levelNumber)
+        .map((l, idx) => ({ ...l, levelNumber: idx + 1 }));
+      levelsRef.current = renumbered;
+      return renumbered;
+    });
+    setCurrentLevel((prev) => {
+      if (prev === levelNumber) return Math.min(levelNumber, levels.length - 1);
+      if (prev > levelNumber) return prev - 1;
+      return prev;
+    });
     setActiveTab('story');
   };
 
@@ -392,6 +442,80 @@ export default function TeacherStoryBuilder() {
   };
 
   // ── Save Draft / Update ──
+  const persistCampaign = async (publish = false): Promise<boolean> => {
+    if (!campaignData?._id) return true;
+    try {
+      const levelsToSave = levelsRef.current;
+      const response = await updateCampaignAPI(campaignData._id, {
+        levels: levelsToSave,
+        published: publish,
+        title,
+        description,
+        targetSection: selectedSections.join(', '),
+        templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
+        customTheme: selectedTemplate === 'others' ? customTheme : null,
+        numLevels: levelsToSave.length,
+        coverImage: coverImage || null,
+      });
+      if (response.campaign?.levels) {
+        const synced = normalizeLevels(response.campaign.levels, { injectAiImage: false });
+        setLevels(synced);
+        levelsRef.current = synced;
+      }
+      return true;
+    } catch (err: unknown) {
+      console.error('Save failed:', err);
+      return false;
+    }
+  };
+
+  const getSaveErrorMessage = (err: unknown) => {
+    let msg = 'Try again.';
+    if (axios.isAxiosError(err)) {
+      if (err.response?.status === 413) {
+        msg = 'The storyboard is too large to save. Try using smaller images or fewer embedded photos.';
+      } else if (err.response?.data) {
+        const data = err.response.data as { error?: string; details?: string };
+        msg = [data.error, data.details].filter(Boolean).join('\n\n') || msg;
+      }
+    }
+    return msg;
+  };
+
+  const leaveEditor = async (leaveAction: () => void) => {
+    if (isSaving || isDeleting) return;
+    if (step === 'editor' && campaignData?._id) {
+      setIsSaving(true);
+      try {
+        const ok = await persistCampaign();
+        if (!ok) {
+          const leave = await confirm({
+            title: 'Auto-save failed',
+            message: 'Your changes could not be saved. Leave anyway?',
+            variant: 'danger',
+            confirmLabel: 'Leave without saving',
+          });
+          if (!leave) return;
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    }
+    skipAutoSaveRef.current = true;
+    leaveAction();
+  };
+
+  const handleBackFromEditor = () => {
+    void leaveEditor(() => {
+      if (isExisting) navigate('/teacher/stories');
+      else setStep('details');
+    });
+  };
+
+  useEffect(() => {
+    skipAutoSaveRef.current = false;
+  }, [editId, step]);
+
   const handleSave = async (publish: boolean) => {
     if (!campaignData?._id) return;
     setIsSaving(true);
@@ -418,18 +542,12 @@ export default function TeacherStoryBuilder() {
         message: publish ? 'Story is now available to students.' : 'Your changes were saved.',
         variant: 'success',
       });
-      if (publish) navigate('/teacher/stories');
-    } catch (err: unknown) {
-      let msg = 'Try again.';
-      if (axios.isAxiosError(err)) {
-        if (err.response?.status === 413) {
-          msg = 'The storyboard is too large to save. Try using smaller images or fewer embedded photos.';
-        } else if (err.response?.data) {
-          const data = err.response.data as { error?: string; details?: string };
-          msg = [data.error, data.details].filter(Boolean).join('\n\n') || msg;
-        }
+      if (publish) {
+        skipAutoSaveRef.current = true;
+        navigate('/teacher/stories');
       }
-      await alert({ title: 'Save failed', message: msg, variant: 'danger' });
+    } catch (err: unknown) {
+      await alert({ title: 'Save failed', message: getSaveErrorMessage(err), variant: 'danger' });
     } finally {
       setIsSaving(false);
     }
@@ -812,11 +930,12 @@ export default function TeacherStoryBuilder() {
           <header style={{ height: 72, background: 'var(--db-card)', backdropFilter: 'blur(20px)', borderBottom: '1px solid var(--db-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 28px', flexShrink: 0, zIndex: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <button
-                onClick={() => (isExisting ? navigate('/teacher/stories') : setStep('details'))}
-                style={{ background: 'var(--db-bg)', border: '1px solid var(--db-border)', width: 38, height: 38, borderRadius: 10, color: 'var(--db-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--db-hover)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'var(--db-bg)'}
-                title={isExisting ? 'Back to stories' : 'Back to details'}
+                onClick={handleBackFromEditor}
+                disabled={isSaving || isDeleting}
+                style={{ background: 'var(--db-bg)', border: '1px solid var(--db-border)', width: 38, height: 38, borderRadius: 10, color: 'var(--db-text)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: (isSaving || isDeleting) ? 'not-allowed' : 'pointer', opacity: (isSaving || isDeleting) ? 0.6 : 1 }}
+                onMouseEnter={e => { if (!isSaving && !isDeleting) e.currentTarget.style.background = 'var(--db-hover)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'var(--db-bg)'; }}
+                title={isSaving ? 'Saving…' : (isExisting ? 'Back to stories (auto-save)' : 'Back to details (auto-save)')}
               >
                 <ChevronDown size={18} style={{ transform: 'rotate(90deg)' }} />
               </button>
@@ -867,44 +986,84 @@ export default function TeacherStoryBuilder() {
               <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--db-accent)', letterSpacing: 1.5, textTransform: 'uppercase', padding: '0 8px', marginBottom: 10 }}>Campaign Map</div>
               <button
                 type="button"
-                onClick={addStoryPage}
-                style={{ ...btnSecondary, width: 'calc(100% - 16px)', marginLeft: 8, marginBottom: 4, borderColor: 'rgba(184,134,11,0.25)', color: '#fcd34d' }}
+                onClick={addLevel}
+                disabled={levels.length >= MAX_LEVELS}
+                style={{
+                  ...btnSecondary,
+                  width: 'calc(100% - 16px)',
+                  marginLeft: 8,
+                  marginBottom: 4,
+                  borderColor: 'rgba(184,134,11,0.25)',
+                  color: '#fcd34d',
+                  opacity: levels.length >= MAX_LEVELS ? 0.45 : 1,
+                  cursor: levels.length >= MAX_LEVELS ? 'not-allowed' : 'pointer',
+                }}
               >
-                + Add Story Page
+                <Plus size={13} /> Add Level
               </button>
               {levels.map((lvl, idx) => (
-                <button
+                <div
                   key={lvl.levelNumber}
-                  draggable
-                  onDragStart={(e) => { setDraggingLevelIndex(idx); e.dataTransfer.effectAllowed = 'move'; }}
-                  onDragOver={(e) => { e.preventDefault(); }}
-                  onDrop={(e) => { e.preventDefault(); if (draggingLevelIndex === null) return; reorderLevels(draggingLevelIndex, idx); setDraggingLevelIndex(null); }}
-                  onClick={() => { setCurrentLevel(lvl.levelNumber); setActiveTab('story'); }}
                   style={{
-                    width: '100%',
-                    textAlign: 'left',
-                    padding: '12px 14px',
-                    background: currentLevel === lvl.levelNumber ? 'rgba(99,102,241,0.15)' : 'transparent',
-                    border: currentLevel === lvl.levelNumber ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
-                    borderRadius: 10,
-                    color: currentLevel === lvl.levelNumber ? '#fff' : '#64748b',
-                    fontWeight: 700,
-                    fontSize: 13,
-                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 10,
+                    gap: 4,
                     opacity: draggingLevelIndex === idx ? 0.6 : 1,
-                    transform: draggingLevelIndex === idx ? 'scale(0.99)' : undefined,
                   }}
-                  title="Drag to reorder"
                 >
-                  <div style={{ width: 26, height: 26, borderRadius: 7, background: currentLevel === lvl.levelNumber ? '#6366F1' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', flexShrink: 0 }}>{lvl.levelNumber}</div>
-                  <div style={{ flex: 1, overflow: 'hidden' }}>
-                    <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lvl.storyNode.title || `Level ${lvl.levelNumber}`}</div>
-                  </div>
-                  {currentLevel === lvl.levelNumber && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#10B981', flexShrink: 0 }} />}
-                </button>
+                  <button
+                    draggable
+                    onDragStart={(e) => { setDraggingLevelIndex(idx); e.dataTransfer.effectAllowed = 'move'; }}
+                    onDragOver={(e) => { e.preventDefault(); }}
+                    onDrop={(e) => { e.preventDefault(); if (draggingLevelIndex === null) return; reorderLevels(draggingLevelIndex, idx); setDraggingLevelIndex(null); }}
+                    onClick={() => { setCurrentLevel(lvl.levelNumber); setActiveTab('story'); }}
+                    style={{
+                      flex: 1,
+                      textAlign: 'left',
+                      padding: '12px 14px',
+                      background: currentLevel === lvl.levelNumber ? 'rgba(99,102,241,0.15)' : 'transparent',
+                      border: currentLevel === lvl.levelNumber ? '1px solid rgba(99,102,241,0.35)' : '1px solid transparent',
+                      borderRadius: 10,
+                      color: currentLevel === lvl.levelNumber ? '#fff' : '#64748b',
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      transform: draggingLevelIndex === idx ? 'scale(0.99)' : undefined,
+                    }}
+                    title="Drag to reorder"
+                  >
+                    <div style={{ width: 26, height: 26, borderRadius: 7, background: currentLevel === lvl.levelNumber ? '#6366F1' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#fff', flexShrink: 0 }}>{lvl.levelNumber}</div>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lvl.storyNode.title || `Level ${lvl.levelNumber}`}</div>
+                    </div>
+                    {currentLevel === lvl.levelNumber && <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#10B981', flexShrink: 0 }} />}
+                  </button>
+                  {levels.length > MIN_LEVELS && (
+                    <button
+                      type="button"
+                      onClick={() => deleteLevel(lvl.levelNumber)}
+                      title={`Delete level ${lvl.levelNumber}`}
+                      style={{
+                        width: 30,
+                        height: 30,
+                        borderRadius: 8,
+                        border: '1px solid rgba(239,68,68,0.25)',
+                        background: 'rgba(239,68,68,0.08)',
+                        color: '#fca5a5',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
 
@@ -921,9 +1080,24 @@ export default function TeacherStoryBuilder() {
                       style={{ background: 'transparent', border: 'none', outline: 'none', color: '#fff', fontSize: 26, fontWeight: 900, fontFamily: 'Outfit, sans-serif', width: '100%' }}
                       placeholder="Level Title..." />
                   </div>
-                  <button onClick={() => setShowRewardsModal(true)} style={{ padding: '9px 18px', borderRadius: 10, fontWeight: 800, fontSize: 12, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#FCD34D', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
-                    <Award size={14} /> Rewards
-                  </button>
+                  <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                    {levels.length > MIN_LEVELS && (
+                      <button
+                        type="button"
+                        onClick={() => deleteLevel(currentLevel)}
+                        style={{
+                          padding: '9px 16px', borderRadius: 10, fontWeight: 700, fontSize: 12,
+                          background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)',
+                          color: '#fca5a5', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7,
+                        }}
+                      >
+                        <Trash2 size={14} /> Delete Level
+                      </button>
+                    )}
+                    <button onClick={() => setShowRewardsModal(true)} style={{ padding: '9px 18px', borderRadius: 10, fontWeight: 800, fontSize: 12, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#FCD34D', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <Award size={14} /> Rewards
+                    </button>
+                  </div>
                 </div>
 
                 {/* Tabs */}
@@ -1097,32 +1271,67 @@ export default function TeacherStoryBuilder() {
                     </div>
 
                     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
-                      <button type="button" onClick={addStoryPage} style={{ ...btnSecondary, borderColor: 'rgba(184,134,11,0.25)', color: '#fcd34d' }}>
-                        + Add Story Page
+                      <button
+                        type="button"
+                        onClick={addLevel}
+                        disabled={levels.length >= MAX_LEVELS}
+                        style={{
+                          ...btnSecondary,
+                          borderColor: 'rgba(184,134,11,0.25)',
+                          color: '#fcd34d',
+                          opacity: levels.length >= MAX_LEVELS ? 0.45 : 1,
+                          cursor: levels.length >= MAX_LEVELS ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        <Plus size={13} /> Add Level
                       </button>
                       {levels.map((lvl, idx) => (
                         <div
                           key={lvl.levelNumber}
-                          draggable
-                          onDragStart={(e) => { setDraggingLevelIndex(idx); e.dataTransfer.effectAllowed = 'move'; }}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => { e.preventDefault(); if (draggingLevelIndex === null) return; reorderLevels(draggingLevelIndex, idx); setDraggingLevelIndex(null); }}
-                          onClick={() => { setCurrentLevel(lvl.levelNumber); setActiveTab('preview'); }}
                           style={{
-                            userSelect: 'none', cursor: 'pointer', padding: '10px 12px', borderRadius: 14,
-                            border: currentLevel === lvl.levelNumber ? '1px solid rgba(168,85,247,0.65)' : '1px solid rgba(255,255,255,0.08)',
-                            background: currentLevel === lvl.levelNumber ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
-                            color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 10,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 6,
                             opacity: draggingLevelIndex === idx ? 0.6 : 1,
                           }}
-                          title="Drag to reorder"
                         >
-                          <div style={{ width: 26, height: 26, borderRadius: 9, background: '#6366F1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 12 }}>
-                            {idx + 1}
+                          <div
+                            draggable
+                            onDragStart={(e) => { setDraggingLevelIndex(idx); e.dataTransfer.effectAllowed = 'move'; }}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => { e.preventDefault(); if (draggingLevelIndex === null) return; reorderLevels(draggingLevelIndex, idx); setDraggingLevelIndex(null); }}
+                            onClick={() => { setCurrentLevel(lvl.levelNumber); setActiveTab('preview'); }}
+                            style={{
+                              userSelect: 'none', cursor: 'pointer', padding: '10px 12px', borderRadius: 14,
+                              border: currentLevel === lvl.levelNumber ? '1px solid rgba(168,85,247,0.65)' : '1px solid rgba(255,255,255,0.08)',
+                              background: currentLevel === lvl.levelNumber ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)',
+                              color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: 10,
+                            }}
+                            title="Drag to reorder"
+                          >
+                            <div style={{ width: 26, height: 26, borderRadius: 9, background: '#6366F1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 900, fontSize: 12 }}>
+                              {idx + 1}
+                            </div>
+                            <div style={{ fontSize: 12, fontWeight: 800, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {lvl.storyNode.title || `Level ${idx + 1}`}
+                            </div>
                           </div>
-                          <div style={{ fontSize: 12, fontWeight: 800, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {lvl.storyNode.title || `Level ${idx + 1}`}
-                          </div>
+                          {levels.length > MIN_LEVELS && (
+                            <button
+                              type="button"
+                              onClick={() => deleteLevel(lvl.levelNumber)}
+                              title={`Delete level ${lvl.levelNumber}`}
+                              style={{
+                                width: 28, height: 28, borderRadius: 8,
+                                border: '1px solid rgba(239,68,68,0.25)',
+                                background: 'rgba(239,68,68,0.08)',
+                                color: '#fca5a5', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
