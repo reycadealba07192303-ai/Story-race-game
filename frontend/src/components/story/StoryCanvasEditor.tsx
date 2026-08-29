@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Image as ImageIcon, Type, Video, Trash2, Upload, Palette, Highlighter,
   Plus, Copy, Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight,
@@ -52,9 +52,32 @@ export default function StoryCanvasEditor({
   const [pageIndex, setPageIndex] = useState(0);
   const page = normalized.pages[Math.min(pageIndex, normalized.pages.length - 1)] || normalized.pages[0];
 
+  // Keep latest pages in a ref so rapid edits (typing, drag) don't use stale render closures.
+  const pagesRef = useRef(normalized.pages);
+  const pageIndexRef = useRef(pageIndex);
+  const pendingCommitRef = useRef(false);
+
+  useEffect(() => {
+    if (pendingCommitRef.current) {
+      pendingCommitRef.current = false;
+      return;
+    }
+    pagesRef.current = normalized.pages;
+  }, [normalized]);
+
+  useEffect(() => {
+    pageIndexRef.current = pageIndex;
+  }, [pageIndex]);
+
+  const [selectedId, setSelectedId] = useState<string | null>(page?.blocks[0]?.id || null);
+
+  useEffect(() => {
+    setPageIndex(0);
+    setSelectedId(null);
+  }, [levelNumber]);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(page?.blocks[0]?.id || null);
   const [drag, setDrag] = useState<{ id: string; mode: DragMode; startX: number; startY: number; orig: StoryBlock } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const bgFileRef = useRef<HTMLInputElement>(null);
@@ -66,29 +89,41 @@ export default function StoryCanvasEditor({
   const isTransparentPage = pageBg.type === 'none' || canvasBg === 'transparent';
 
   const commitPages = (pages: StoryPage[]) => {
+    pagesRef.current = pages;
+    pendingCommitRef.current = true;
     onChange({ pages });
   };
 
   const updatePage = (patch: Partial<StoryPage>) => {
-    const pages = normalized.pages.map((p, i) => (i === pageIndex ? { ...p, ...patch } : p));
+    const idx = pageIndexRef.current;
+    const pages = pagesRef.current.map((p, i) => (i === idx ? { ...p, ...patch } : p));
     commitPages(pages);
   };
 
   const updateBlock = (id: string, patch: Partial<StoryBlock>) => {
+    const idx = pageIndexRef.current;
+    const currentPage = pagesRef.current[idx];
+    if (!currentPage) return;
     updatePage({
-      blocks: page.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
+      blocks: currentPage.blocks.map((b) => (b.id === id ? { ...b, ...patch } : b)),
     });
   };
 
   const addBlock = (type: StoryBlockType) => {
+    const idx = pageIndexRef.current;
+    const currentPage = pagesRef.current[idx];
+    if (!currentPage) return;
     const block = createDefaultBlock(type);
-    block.zIndex = Math.max(0, ...page.blocks.map((b) => b.zIndex), 0) + 1;
-    updatePage({ blocks: [...page.blocks, block] });
+    block.zIndex = Math.max(0, ...currentPage.blocks.map((b) => b.zIndex), 0) + 1;
+    updatePage({ blocks: [...currentPage.blocks, block] });
     setSelectedId(block.id);
   };
 
   const duplicateSelected = () => {
     if (!selected) return;
+    const idx = pageIndexRef.current;
+    const currentPage = pagesRef.current[idx];
+    if (!currentPage) return;
     const copy: StoryBlock = {
       ...selected,
       id: createDefaultBlock(selected.type).id,
@@ -96,37 +131,43 @@ export default function StoryCanvasEditor({
       y: Math.min(88, selected.y + 4),
       zIndex: selected.zIndex + 1,
     };
-    updatePage({ blocks: [...page.blocks, copy] });
+    updatePage({ blocks: [...currentPage.blocks, copy] });
     setSelectedId(copy.id);
   };
 
   const removeBlock = async (id: string) => {
-    const next = page.blocks.filter((b) => b.id !== id);
+    const idx = pageIndexRef.current;
+    const currentPage = pagesRef.current[idx];
+    if (!currentPage) return;
+    const next = currentPage.blocks.filter((b) => b.id !== id);
     updatePage({ blocks: next.length ? next : [createDefaultBlock('text')] });
     setSelectedId(next[0]?.id || null);
   };
 
   const addPage = () => {
-    const pages = [...normalized.pages, createBlankPage()];
+    const pages = [...pagesRef.current, createBlankPage()];
     commitPages(pages);
     setPageIndex(pages.length - 1);
     setSelectedId(null);
   };
 
   const duplicatePage = () => {
+    const idx = pageIndexRef.current;
+    const currentPage = pagesRef.current[idx];
+    if (!currentPage) return;
     const clone: StoryPage = {
       id: createPageId(),
-      background: page.background ? { ...page.background } : { type: 'preset', value: 'sunny' },
-      blocks: page.blocks.map((b) => ({ ...b, id: createDefaultBlock(b.type).id })),
+      background: currentPage.background ? { ...currentPage.background } : { type: 'preset', value: 'sunny' },
+      blocks: currentPage.blocks.map((b) => ({ ...b, id: createDefaultBlock(b.type).id })),
     };
-    const pages = [...normalized.pages];
-    pages.splice(pageIndex + 1, 0, clone);
+    const pages = [...pagesRef.current];
+    pages.splice(idx + 1, 0, clone);
     commitPages(pages);
-    setPageIndex(pageIndex + 1);
+    setPageIndex(idx + 1);
   };
 
   const deletePage = async () => {
-    if (normalized.pages.length <= 1) {
+    if (pagesRef.current.length <= 1) {
       await alert({ title: 'Keep one page', message: 'A level needs at least one story page.', variant: 'warning' });
       return;
     }
@@ -137,9 +178,10 @@ export default function StoryCanvasEditor({
       confirmLabel: 'Delete page',
     });
     if (!ok) return;
-    const pages = normalized.pages.filter((_, i) => i !== pageIndex);
+    const idx = pageIndexRef.current;
+    const pages = pagesRef.current.filter((_, i) => i !== idx);
     commitPages(pages);
-    setPageIndex(Math.max(0, pageIndex - 1));
+    setPageIndex(Math.max(0, idx - 1));
     setSelectedId(null);
   };
 

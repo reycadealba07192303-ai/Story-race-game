@@ -1,12 +1,10 @@
-const Groq = require('groq-sdk');
 const https = require('https');
+const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
 const User = require('../models/User');
 const { notifyMany } = require('../utils/notify');
 const { logAudit } = require('../utils/audit');
-
-// Initialize Groq — uses GROQ_API_KEY from .env
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const { generateCampaignJson, parseCampaignJson } = require('../services/aiService');
 
 function canAccessCampaign(campaign, user) {
   if (!campaign || !user) return false;
@@ -142,27 +140,26 @@ exports.generateCampaign = async (req, res) => {
     const { title, description, targetSection, numLevels, templateId, customTheme } = req.body;
     const themeLabel = templateId === 'others' && customTheme ? customTheme : (templateId || 'space');
 
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({ error: 'GROQ_API_KEY is not set in the .env file.' });
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        error: 'Database is not connected. AI generation needs MongoDB to save the campaign.',
+        details: 'Start the backend and check MONGO_URI in backend/.env',
+      });
     }
 
-    // ── Step 1: Generate story text + quiz via Groq ──
-    const completion = await groq.chat.completions.create({
-      model: process.env.GROQ_MODEL || 'openai/gpt-oss-120b',
-      messages: [
-        {
-          role: 'user',
-          content: buildPrompt(title, description, targetSection, numLevels) +
-            `\nThe visual theme of this campaign is: "${themeLabel}". Incorporate this theme subtly into the story content and level titles.`,
-        },
-      ],
-      temperature: 0.7,
-      max_tokens: 6000,
-    });
+    if (!process.env.GROQ_API_KEY && !process.env.GEMINI_API_KEY) {
+      return res.status(500).json({
+        error: 'No AI provider configured.',
+        details: 'Set GROQ_API_KEY or GEMINI_API_KEY in backend/.env',
+      });
+    }
 
-    let responseText = completion.choices[0]?.message?.content ?? '';
-    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const campaignData = JSON.parse(responseText);
+    const prompt = buildPrompt(title, description, targetSection, numLevels) +
+      `\nThe visual theme of this campaign is: "${themeLabel}". Incorporate this theme subtly into the story content and level titles.`;
+
+    const aiResult = await generateCampaignJson(prompt);
+    const campaignData = parseCampaignJson(aiResult.text);
+    console.log(`Campaign generated via ${aiResult.provider} (${aiResult.model})`);
 
     // ── Step 2: Generate one illustration per level in parallel (Pollinations.ai) ──
     const imageResults = await Promise.allSettled(
@@ -209,7 +206,10 @@ exports.generateCampaign = async (req, res) => {
     res.status(201).json({ message: 'Campaign generated successfully!', campaign: newCampaign });
   } catch (error) {
     console.error('Error generating campaign:', error);
-    res.status(500).json({ error: 'Failed to generate campaign', details: error.message });
+    res.status(500).json({
+      error: 'Failed to generate campaign',
+      details: error.message,
+    });
   }
 };
 
@@ -326,26 +326,26 @@ exports.updateCampaign = async (req, res) => {
     }
 
     const wasPublished = Boolean(before.published);
-    const updated = await Campaign.findByIdAndUpdate(
-      id,
-      {
-        ...(levels && { levels, numLevels: Array.isArray(levels) ? levels.length : undefined }),
-        ...(numLevels !== undefined && { numLevels }),
-        ...(published !== undefined && { published }),
-        ...(scheduledAt !== undefined && { scheduledAt }),
-        ...(title !== undefined && { title }),
-        ...(description !== undefined && { description }),
-        ...(targetSection !== undefined && { targetSection }),
-        ...(templateId !== undefined && { templateId }),
-        ...(customTheme !== undefined && { customTheme }),
-        ...(theme !== undefined && { theme }),
-        ...(moralLesson !== undefined && { moralLesson }),
-        ...(coverImage !== undefined && { coverImage }),
-      },
-      { new: true }
-    );
+    const camp = before;
 
-    if (!updated) return res.status(404).json({ error: 'Campaign not found' });
+    if (levels) {
+      camp.levels = levels;
+      camp.numLevels = Array.isArray(levels) ? levels.length : camp.numLevels;
+      camp.markModified('levels');
+    }
+    if (numLevels !== undefined) camp.numLevels = numLevels;
+    if (published !== undefined) camp.published = published;
+    if (scheduledAt !== undefined) camp.scheduledAt = scheduledAt;
+    if (title !== undefined) camp.title = title;
+    if (description !== undefined) camp.description = description;
+    if (targetSection !== undefined) camp.targetSection = targetSection;
+    if (templateId !== undefined) camp.templateId = templateId;
+    if (customTheme !== undefined) camp.customTheme = customTheme;
+    if (theme !== undefined) camp.theme = theme;
+    if (moralLesson !== undefined) camp.moralLesson = moralLesson;
+    if (coverImage !== undefined) camp.coverImage = coverImage;
+
+    const updated = await camp.save();
 
     // Notify students when a campaign becomes published
     if (!wasPublished && updated.published) {

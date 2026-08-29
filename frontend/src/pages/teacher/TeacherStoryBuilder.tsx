@@ -36,16 +36,24 @@ interface LevelData {
   customImage?: string | null;
 }
 
-function ensureStoryLayout(level: LevelData): LevelData {
+function hasPersistedStoryLayout(level: LevelData): boolean {
+  const sl = level.storyNode.storyLayout;
+  if (!sl) return false;
+  if (Array.isArray(sl.pages) && sl.pages.length > 0) return true;
+  if (Array.isArray(sl.blocks) && sl.blocks.length > 0) return true;
+  return false;
+}
+
+function ensureStoryLayout(level: LevelData, options?: { injectAiImage?: boolean }): LevelData {
+  const injectAiImage = options?.injectAiImage ?? !hasPersistedStoryLayout(level);
   const normalized = normalizeStoryLayout(
-    level.storyNode.storyLayout?.pages?.length || level.storyNode.storyLayout?.blocks?.length
+    hasPersistedStoryLayout(level)
       ? level.storyNode.storyLayout
       : layoutFromStoryContent(level.storyNode.content, level.storyNode.title)
   );
 
-  // If AI generated a cover illustration, inject it into the first image block
-  // of each page so the storybook looks illustrated right away.
-  const aiImage = level.customImage || null;
+  // Only auto-fill AI illustrations on first client-side layout (not when reloading saved work).
+  const aiImage = injectAiImage ? (level.customImage || null) : null;
 
   return {
     ...level,
@@ -81,11 +89,11 @@ function ensureStoryLayout(level: LevelData): LevelData {
 }
 
 
-function normalizeLevels(levels: LevelData[]) {
+function normalizeLevels(levels: LevelData[], options?: { injectAiImage?: boolean }) {
   return levels.map((l) => ensureStoryLayout({
     ...l,
     quiz: (l.quiz || []).map(normalizeQuestion),
-  }));
+  }, options));
 }
 interface CampaignData {
   _id?: string;
@@ -163,9 +171,14 @@ export default function TeacherStoryBuilder() {
   // ── Refs ──
   const fileInputRef = useRef<HTMLInputElement>(null);
   const storyFileRef = useRef<HTMLInputElement>(null);
+  const levelsRef = useRef<LevelData[]>([]);
 
   const [availableSections, setAvailableSections] = useState<Section[]>([]);
-  
+
+  useEffect(() => {
+    levelsRef.current = levels;
+  }, [levels]);
+
   useEffect(() => {
     let cancelled = false;
     getSectionsAPI().then(res => {
@@ -210,8 +223,9 @@ export default function TeacherStoryBuilder() {
           customTheme: camp.customTheme,
           published: camp.published,
         });
-        const normalized = normalizeLevels(camp.levels || []);
+        const normalized = normalizeLevels(camp.levels || [], { injectAiImage: false });
         setLevels(normalized);
+        levelsRef.current = normalized;
         setCurrentLevel(normalized[0]?.levelNumber || 1);
         setActiveTab('story');
         setIsExisting(true);
@@ -295,7 +309,9 @@ export default function TeacherStoryBuilder() {
         });
         const camp: CampaignData = response.campaign;
         setCampaignData({ ...camp, storySource: 'manual' });
-        setLevels(normalizeLevels(camp.levels));
+        const normalizedManual = normalizeLevels(camp.levels, { injectAiImage: true });
+        setLevels(normalizedManual);
+        levelsRef.current = normalizedManual;
       } else {
         const response = await generateCampaignAPI({
           title, description, section: selectedSections.join(', '), numLevels: numLevels || 5,
@@ -304,7 +320,9 @@ export default function TeacherStoryBuilder() {
         });
         const camp: CampaignData = response.campaign;
         setCampaignData({ ...camp, storySource: 'ai' });
-        setLevels(normalizeLevels(camp.levels));
+        const normalizedAi = normalizeLevels(camp.levels, { injectAiImage: true });
+        setLevels(normalizedAi);
+        levelsRef.current = normalizedAi;
       }
       setCurrentLevel(1);
       setActiveTab('story');
@@ -378,25 +396,40 @@ export default function TeacherStoryBuilder() {
     if (!campaignData?._id) return;
     setIsSaving(true);
     try {
-      await updateCampaignAPI(campaignData._id, {
-        levels,
+      const levelsToSave = levelsRef.current;
+      const response = await updateCampaignAPI(campaignData._id, {
+        levels: levelsToSave,
         published: publish,
         title,
         description,
         targetSection: selectedSections.join(', '),
         templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
         customTheme: selectedTemplate === 'others' ? customTheme : null,
-        numLevels: levels.length,
+        numLevels: levelsToSave.length,
         coverImage: coverImage || null,
       });
+      if (response.campaign?.levels) {
+        const synced = normalizeLevels(response.campaign.levels, { injectAiImage: false });
+        setLevels(synced);
+        levelsRef.current = synced;
+      }
       await alert({
         title: publish ? 'Published' : 'Draft saved',
         message: publish ? 'Story is now available to students.' : 'Your changes were saved.',
         variant: 'success',
       });
       if (publish) navigate('/teacher/stories');
-    } catch {
-      await alert({ title: 'Save failed', message: 'Try again.', variant: 'danger' });
+    } catch (err: unknown) {
+      let msg = 'Try again.';
+      if (axios.isAxiosError(err)) {
+        if (err.response?.status === 413) {
+          msg = 'The storyboard is too large to save. Try using smaller images or fewer embedded photos.';
+        } else if (err.response?.data) {
+          const data = err.response.data as { error?: string; details?: string };
+          msg = [data.error, data.details].filter(Boolean).join('\n\n') || msg;
+        }
+      }
+      await alert({ title: 'Save failed', message: msg, variant: 'danger' });
     } finally {
       setIsSaving(false);
     }
@@ -432,14 +465,18 @@ export default function TeacherStoryBuilder() {
     setIsPublishing(true);
     try {
       const scheduledAt = new Date(`${publishDate}T${publishTime}`).toISOString();
+      const levelsToSave = levelsRef.current;
       await updateCampaignAPI(campaignData._id, {
-        levels,
+        levels: levelsToSave,
         published: true,
         scheduledAt,
         title,
         description,
         targetSection: selectedSections.join(', '),
-        numLevels: levels.length,
+        templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
+        customTheme: selectedTemplate === 'others' ? customTheme : null,
+        numLevels: levelsToSave.length,
+        coverImage: coverImage || null,
       });
       setShowPublishModal(false);
       navigate('/teacher/stories');
@@ -928,6 +965,7 @@ export default function TeacherStoryBuilder() {
                     </div>
 
                     <StoryCanvasEditor
+                      key={currentLevel}
                       title={currentLevelData.storyNode.title}
                       levelNumber={currentLevel}
                       layout={normalizeStoryLayout(currentLevelData.storyNode.storyLayout)}
