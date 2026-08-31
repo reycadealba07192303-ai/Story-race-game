@@ -24,7 +24,7 @@ import {
   normalizeStoryLayout,
   type StoryLayout,
 } from '../../types/storyLayout';
-import { useDialog } from '../DialogProvider';
+import { useDialog } from '../../components/DialogProvider';
 import {
   compressImageFile,
   estimateCampaignBytes,
