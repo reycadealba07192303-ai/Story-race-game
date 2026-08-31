@@ -18,6 +18,7 @@ import {
 } from '../../types/storyLayout';
 import StoryPageRenderer from './StoryPageRenderer';
 import { useDialog } from '../DialogProvider';
+import { compressImageFile } from '../../utils/storyImageOptimizer';
 
 interface Props {
   title: string;
@@ -216,12 +217,9 @@ export default function StoryCanvasEditor({
   const handleImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !pendingImageId) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => updateBlock(pendingImageId, {
-      content: ev.target?.result as string,
-      objectFit: 'contain',
-    });
-    reader.readAsDataURL(file);
+    void compressImageFile(file, 960).then((content) => {
+      updateBlock(pendingImageId!, { content, objectFit: 'contain' });
+    }).catch(console.error);
     e.target.value = '';
     setPendingImageId(null);
   };
@@ -229,11 +227,9 @@ export default function StoryCanvasEditor({
   const handleBgImagePick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => updatePage({
-      background: { type: 'image', value: ev.target?.result as string },
-    });
-    reader.readAsDataURL(file);
+    void compressImageFile(file, 1280).then((value) => {
+      updatePage({ background: { type: 'image', value } });
+    }).catch(console.error);
     e.target.value = '';
   };
 

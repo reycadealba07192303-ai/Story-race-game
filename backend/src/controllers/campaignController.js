@@ -345,28 +345,43 @@ exports.updateCampaign = async (req, res) => {
     if (moralLesson !== undefined) camp.moralLesson = moralLesson;
     if (coverImage !== undefined) camp.coverImage = coverImage;
 
+    const approxBytes = Buffer.byteLength(JSON.stringify({
+      title: camp.title,
+      description: camp.description,
+      coverImage: camp.coverImage,
+      levels: camp.levels,
+    }), 'utf8');
+    if (approxBytes > 15 * 1024 * 1024) {
+      return res.status(413).json({
+        error: 'Campaign too large to save',
+        details: 'This story has too many images or pages. Use smaller photos or fewer story pages per level, then try again.',
+      });
+    }
+
     const updated = await camp.save();
 
-    // Notify students when a campaign becomes published
+    // Notify students when a campaign becomes published (don't block the response)
     if (!wasPublished && updated.published) {
-      try {
-        const filter = { role: 'student', status: { $ne: 'disabled' } };
-        if (updated.targetSection && updated.targetSection !== 'All' && updated.targetSection !== 'NA') {
-          filter.section = updated.targetSection;
-        }
-        const students = await User.find(filter).select('_id').lean();
-        await notifyMany(
-          students.map((s) => s._id),
-          {
-            title: 'New story available',
-            message: `"${updated.title}" is ready to read in your section.`,
-            type: 'story',
-            link: '/student/section',
+      void (async () => {
+        try {
+          const filter = { role: 'student', status: { $ne: 'disabled' } };
+          if (updated.targetSection && updated.targetSection !== 'All' && updated.targetSection !== 'NA') {
+            filter.section = updated.targetSection;
           }
-        );
-      } catch (notifyErr) {
-        console.error('Publish notify failed:', notifyErr.message);
-      }
+          const students = await User.find(filter).select('_id').lean();
+          await notifyMany(
+            students.map((s) => s._id),
+            {
+              title: 'New story available',
+              message: `"${updated.title}" is ready to read in your section.`,
+              type: 'story',
+              link: '/student/section',
+            }
+          );
+        } catch (notifyErr) {
+          console.error('Publish notify failed:', notifyErr.message);
+        }
+      })();
     }
 
     await logAudit({

@@ -24,7 +24,13 @@ import {
   normalizeStoryLayout,
   type StoryLayout,
 } from '../../types/storyLayout';
-import { useDialog } from '../../components/DialogProvider';
+import { useDialog } from '../DialogProvider';
+import {
+  compressImageFile,
+  estimateCampaignBytes,
+  optimizeCoverImage,
+  optimizeLevelsForSave,
+} from '../../utils/storyImageOptimizer';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface VocabEntry { word: string; definition: string; example?: string; }
@@ -260,11 +266,8 @@ export default function TeacherStoryBuilder() {
   // ── Cover upload ──
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = ev => setCoverImage(ev.target?.result as string);
-      reader.readAsDataURL(file);
-    }
+    if (!file) return;
+    void compressImageFile(file, 1280).then(setCoverImage).catch(console.error);
   };
 
   // ── Immutable level updater ──
@@ -442,21 +445,27 @@ export default function TeacherStoryBuilder() {
   };
 
   // ── Save Draft / Update ──
+  const buildSavePayload = async (publish = false) => {
+    const levelsToSave = await optimizeLevelsForSave(levelsRef.current);
+    const optimizedCover = await optimizeCoverImage(coverImage);
+    return {
+      levels: levelsToSave,
+      published: publish,
+      title,
+      description,
+      targetSection: selectedSections.join(', '),
+      templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
+      customTheme: selectedTemplate === 'others' ? customTheme : null,
+      numLevels: levelsToSave.length,
+      coverImage: optimizedCover,
+    };
+  };
+
   const persistCampaign = async (publish = false): Promise<boolean> => {
     if (!campaignData?._id) return true;
     try {
-      const levelsToSave = levelsRef.current;
-      const response = await updateCampaignAPI(campaignData._id, {
-        levels: levelsToSave,
-        published: publish,
-        title,
-        description,
-        targetSection: selectedSections.join(', '),
-        templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
-        customTheme: selectedTemplate === 'others' ? customTheme : null,
-        numLevels: levelsToSave.length,
-        coverImage: coverImage || null,
-      });
+      const payload = await buildSavePayload(publish);
+      const response = await updateCampaignAPI(campaignData._id, payload);
       if (response.campaign?.levels) {
         const synced = normalizeLevels(response.campaign.levels, { injectAiImage: false });
         setLevels(synced);
@@ -520,18 +529,8 @@ export default function TeacherStoryBuilder() {
     if (!campaignData?._id) return;
     setIsSaving(true);
     try {
-      const levelsToSave = levelsRef.current;
-      const response = await updateCampaignAPI(campaignData._id, {
-        levels: levelsToSave,
-        published: publish,
-        title,
-        description,
-        targetSection: selectedSections.join(', '),
-        templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
-        customTheme: selectedTemplate === 'others' ? customTheme : null,
-        numLevels: levelsToSave.length,
-        coverImage: coverImage || null,
-      });
+      const payload = await buildSavePayload(publish);
+      const response = await updateCampaignAPI(campaignData._id, payload);
       if (response.campaign?.levels) {
         const synced = normalizeLevels(response.campaign.levels, { injectAiImage: false });
         setLevels(synced);
@@ -583,9 +582,27 @@ export default function TeacherStoryBuilder() {
     setIsPublishing(true);
     try {
       const scheduledAt = new Date(`${publishDate}T${publishTime}`).toISOString();
-      const levelsToSave = levelsRef.current;
+      const draftPayload = await buildSavePayload(false);
+
+      // Step 1: compress & save story content
+      const saveResponse = await updateCampaignAPI(campaignData._id, {
+        levels: draftPayload.levels,
+        title: draftPayload.title,
+        description: draftPayload.description,
+        targetSection: draftPayload.targetSection,
+        templateId: draftPayload.templateId,
+        customTheme: draftPayload.customTheme,
+        numLevels: draftPayload.numLevels,
+        coverImage: draftPayload.coverImage,
+      });
+      if (saveResponse.campaign?.levels) {
+        const synced = normalizeLevels(saveResponse.campaign.levels, { injectAiImage: false });
+        setLevels(synced);
+        levelsRef.current = synced;
+      }
+
+      // Step 2: lightweight publish (no heavy levels payload)
       await updateCampaignAPI(campaignData._id, {
-        levels: levelsToSave,
         published: true,
         scheduledAt,
         title,
@@ -593,13 +610,22 @@ export default function TeacherStoryBuilder() {
         targetSection: selectedSections.join(', '),
         templateId: selectedTemplate === 'others' ? 'others' : selectedTemplate,
         customTheme: selectedTemplate === 'others' ? customTheme : null,
-        numLevels: levelsToSave.length,
-        coverImage: coverImage || null,
+        numLevels: draftPayload.numLevels,
       });
+
+      skipAutoSaveRef.current = true;
       setShowPublishModal(false);
       navigate('/teacher/stories');
-    } catch {
-      await alert({ title: 'Publish failed', message: 'Try again.', variant: 'danger' });
+    } catch (err: unknown) {
+      const bytes = estimateCampaignBytes(levelsRef.current, coverImage);
+      const sizeHint = bytes > 12 * 1024 * 1024
+        ? '\n\nTip: Try fewer story pages per level or use smaller images.'
+        : '';
+      await alert({
+        title: 'Publish failed',
+        message: getSaveErrorMessage(err) + sizeHint,
+        variant: 'danger',
+      });
     } finally {
       setIsPublishing(false);
     }
@@ -1461,7 +1487,7 @@ export default function TeacherStoryBuilder() {
               </button>
               <button onClick={handlePublishConfirm} disabled={isPublishing || !publishDate || !publishTime}
                 style={{ flex: 2, padding: '13px', borderRadius: 12, background: (!publishDate || !publishTime) ? 'rgba(16,185,129,0.3)' : 'linear-gradient(135deg, #10B981, #059669)', border: 'none', color: '#fff', fontWeight: 800, fontSize: 14, cursor: (!publishDate || !publishTime) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: (!publishDate || !publishTime) ? 0.5 : 1 }}>
-                <Check size={16} /> {isPublishing ? 'Publishing...' : 'Confirm & Publish'}
+                <Check size={16} /> {isPublishing ? 'Saving & publishing…' : 'Confirm & Publish'}
               </button>
             </div>
 
